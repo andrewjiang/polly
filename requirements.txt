@@ -1,0 +1,17 @@
+# Hardware interaction
+RPi.GPIO==0.7.1  # For GPIO pin control (button)
+pyaudio==0.2.13  # For audio recording and playback
+webrtcvad==2.0.10  # For voice activity detection
+pygame==2.1.2  # For audio playback
+
+# WebSocket communication
+websockets==10.4  # For real-time communication with web app
+asyncio==3.4.3  # For asynchronous I/O
+
+# Utilities
+numpy==1.24.3  # For audio processing
+wave==0.0.2  # For audio file handling
+python-dotenv==1.0.0  # For environment variables
+
+# Testing
+pytest==7.3.1  # For unit testing

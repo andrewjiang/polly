@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Polly - AI-Powered Talking Bird</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>Polly</h1>
+            <h2>AI-Powered Talking Bird</h2>
+        </header>
+
+        <main>
+            <div class="connection-status">
+                <div id="status-indicator" class="status-indicator disconnected"></div>
+                <span id="status-text">Disconnected</span>
+            </div>
+
+            <div class="control-panel">
+                <div class="ip-input">
+                    <label for="pi-ip">Raspberry Pi IP:</label>
+                    <input type="text" id="pi-ip" value="192.168.1.1" placeholder="e.g., 192.168.1.100">
+                    <button id="connect-btn">Connect</button>
+                </div>
+
+                <div class="api-keys">
+                    <label for="openai-key">OpenAI API Key:</label>
+                    <input type="password" id="openai-key" placeholder="sk-...">
+                </div>
+            </div>
+
+            <div class="conversation-panel">
+                <div id="conversation" class="conversation">
+                    <div class="message system">
+                        <p>Welcome to Polly! Connect to your Raspberry Pi to get started.</p>
+                    </div>
+                </div>
+            </div>
+
+            <div class="audio-panel">
+                <div class="audio-status">
+                    <span id="audio-status-text">No audio received yet</span>
+                </div>
+                <div class="audio-controls">
+                    <button id="play-audio-btn" disabled>Play Last Audio</button>
+                    <button id="test-btn">Test Connection</button>
+                </div>
+            </div>
+        </main>
+
+        <footer>
+            <p>Polly - ChatGPT-Powered Talking Bird</p>
+        </footer>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html>
