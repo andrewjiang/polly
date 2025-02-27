@@ -1,103 +1,128 @@
-# Polly - AI-Powered Talking Bird
+# Polly - Voice Assistant
 
-Polly is a stuffed bird with an embedded Raspberry Pi 4 that enables natural voice interaction for children. It listens, responds intelligently using ChatGPT, and provides an engaging, interactive experience.
+Polly is a voice assistant that processes speech and generate responses. It's designed to run on a Raspberry Pi with a button and microphone.
 
-## Overview
+## Features
 
-Polly is activated via a hidden push button in its wing and records speech until 2 seconds of silence. It then sends the recorded speech to a connected smartphone via Wi-Fi, where the phone processes the audio, generates a ChatGPT-powered response, and sends back Polly's reply using text-to-speech.
-
-## Repository Structure
-
-```
-polly/
-├── hardware/           # GPIO and audio handling scripts
-├── server/             # WebSocket server for Pi-to-phone communication
-├── web_app/            # Web interface for iPhone
-├── audio/              # Pre-recorded response sounds
-│   └── responses/      # Directory for response audio files
-├── tests/              # Unit and integration tests
-├── docs/               # Developer documentation
-├── main.py             # Main entry point for the application
-├── requirements.txt    # Python dependencies
-├── README.md           # This file
-├── PRD.md              # Product Requirements Document
-└── SPECS.md            # Technical Specifications
-```
+- Button-triggered audio recording
+- WebSocket communication with a web app for audio processing
+- Audio playback of responses
+- Configurable settings via environment variables or command line arguments
+- Health monitoring of system components
+- Structured logging with operation tracking
+- Graceful error handling and recovery
+- Mock implementations for development without hardware
 
 ## Hardware Requirements
 
-- Raspberry Pi 4 Model B (4GB) - CanaKit Starter PRO Kit
-- 3.5mm Lavalier Mic (via Plugable USB Audio Adapter)
-- HONKYOB USB Mini Speaker (USB-powered)
-- Lilypad Momentary Push Button (Hidden inside the wing, connected to GPIO 17)
-- 5V 3A Power Supply (from CanaKit) / USB Power Bank for portability
-- Wi-Fi connectivity (connecting to phone hotspot)
+- Raspberry Pi (tested on Raspberry Pi 4)
+- USB microphone or USB audio interface
+- Speaker connected to the headphone jack or USB audio interface
+- Push button connected to GPIO pin 17
+- LED connected to GPIO pin 27 (optional)
 
-## Software Components
+## Software Requirements
 
-### Raspberry Pi
-- Python scripts for hardware interaction (button, audio)
-- WebSocket server for communication with the web app
-- Audio recording and playback functionality
+- Raspberry Pi OS (Bullseye or newer)
+- Python 3.7+
+- Required Python packages (see requirements.txt)
 
-### Web App (iPhone)
-- Simple web interface for processing audio
-- Integration with OpenAI APIs (Whisper for STT, ChatGPT for responses)
-- Text-to-Speech conversion
-- WebSocket client for communication with the Pi
+## Installation
 
-## Setup Instructions
-
-### Raspberry Pi Setup
-1. Install Raspberry Pi OS on the microSD card
-2. Configure the USB sound adapter for both microphone and speaker
-3. Install required dependencies:
-   ```bash
-   sudo apt-get install python3-pyaudio python3-pygame
-   pip install websockets RPi.GPIO
+1. Clone the repository:
    ```
-4. Clone this repository and install Python dependencies:
-   ```bash
    git clone https://github.com/yourusername/polly.git
    cd polly
+   ```
+
+2. Install dependencies:
+   ```
    pip install -r requirements.txt
    ```
-5. Run the main application:
-   ```bash
-   python main.py
+
+3. Create a `.env` file with your configuration (optional):
+   ```
+   POLLY_HOST=localhost
+   POLLY_PORT=8765
+   POLLY_BUTTON_PIN=17
+   POLLY_RECORDING_TIME=5
    ```
 
-### Web App Setup
-1. Host the web app files on a local or cloud server
-2. Access the web app from an iPhone
-3. Connect to the Raspberry Pi's WebSocket server
-4. Configure OpenAI API keys in the web app
+## Usage
 
-## User Flow
-1. User presses the button (hidden in Polly's wing)
-2. Polly starts listening and records the child's speech
-3. Polly sends the recording to the connected phone via Wi-Fi
-4. The phone web app processes the audio and generates a response
-5. The phone sends the synthesized audio back to Polly
-6. Polly plays the response using its USB-powered speaker
+### Basic Usage
+
+Run Polly with default settings:
+
+```
+python main.py
+```
+
+### Command Line Options
+
+```
+python main.py --host localhost --port 8765 --button-pin 17 --debug
+```
+
+Available options:
+- `--host`: WebSocket server host (default: localhost)
+- `--port`: WebSocket server port (default: 8765)
+- `--button-pin`: GPIO pin for the button (default: 17)
+- `--debug`: Enable debug logging
+
+### Environment Variables
+
+All settings can be configured via environment variables:
+
+- `POLLY_HOST`: WebSocket server host
+- `POLLY_PORT`: WebSocket server port
+- `POLLY_BUTTON_PIN`: GPIO pin for the button
+- `POLLY_AUDIO_CHANNELS`: Number of audio channels
+- `POLLY_AUDIO_RATE`: Audio sample rate
+- `POLLY_AUDIO_CHUNK`: Audio chunk size
+- `POLLY_RECORDING_TIME`: Recording duration in seconds
+- `POLLY_SOUNDS_DIR`: Directory for sound files
+- `POLLY_STATUS_FILE`: Path to status file
+- `POLLY_LOG_FILE`: Path to log file
+- `POLLY_LOG_LEVEL`: Logging level
+
+## Project Structure
+
+- `main.py`: Main application entry point
+- `config.py`: Configuration management
+- `utils/`: Utility modules
+  - `logging_utils.py`: Enhanced logging functionality
+  - `health_monitor.py`: System health monitoring
+- `sounds/`: Directory for sound files
+  - `start_recording.wav`: Sound played when recording starts
+  - `stop_recording.wav`: Sound played when recording stops
 
 ## Development
 
-### Prerequisites
-- Python 3.7+
-- Node.js (for web development)
-- OpenAI API keys
-- Raspberry Pi hardware setup
+### Running Without Hardware
 
-### Running Tests
-```bash
-# Run unit tests
-python -m unittest discover tests
-```
+The application includes mock implementations for hardware components, allowing development and testing without a Raspberry Pi, button, or audio devices.
+
+### Adding Custom Sounds
+
+Place WAV files in the `sounds` directory:
+- `start_recording.wav`: Played when recording starts
+- `stop_recording.wav`: Played when recording stops
+
+## Health Monitoring
+
+The application includes a health monitoring system that tracks the status of various components. The status is saved to a JSON file (`polly_status.json` by default) and can be used to monitor the application's health.
+
+## Logging
+
+Logs are written to both the console and a log file (`polly.log` by default). The logging level can be configured via the `POLLY_LOG_LEVEL` environment variable or the `--debug` command line option.
 
 ## License
-[MIT License](LICENSE)
 
-## Acknowledgements
-- OpenAI for ChatGPT and Whisper APIs
-- Raspberry Pi Foundation
+This project is licensed under the MIT License - see the LICENSE file for details.
+
+## Acknowledgments
+
+- OpenAI for Whisper and ChatGPT APIs
+- Eleven Labs for text-to-speech API
+- The Raspberry Pi community

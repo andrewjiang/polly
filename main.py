@@ -1,317 +1,315 @@
 #!/usr/bin/env python3
 """
-Polly - AI-Powered Talking Bird
+Polly - Voice Assistant using OpenAI's Realtime API
 
-Main entry point for the Polly application.
+This script implements a voice assistant that:
+1. Waits for the user to press Enter
+2. Records audio and streams it to OpenAI's Realtime API
+3. Plays back the audio response in real-time
+4. Provides text transcripts of the conversation
 """
 
 import os
 import time
-import threading
-import argparse
 import logging
+import threading
+import signal
+import sys
 import asyncio
+from dotenv import load_dotenv
+import elevenlabs
+from elevenlabs.client import ElevenLabs
+from elevenlabs.conversational_ai.conversation import Conversation
+from elevenlabs.conversational_ai.default_audio_interface import DefaultAudioInterface
+
+# Load environment variables
+load_dotenv()
 
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler("polly.log"),
+        logging.StreamHandler()
+    ]
 )
 logger = logging.getLogger(__name__)
 
-# Import hardware modules
-try:
-    from hardware.button import Button
-    from hardware.audio import AudioRecorder, AudioPlayer
-except ImportError as e:
-    logger.error(f"Error importing hardware modules: {e}")
-    logger.warning("Running in mock mode without hardware support")
-    
-    # Mock implementations for development without hardware
-    class MockButton:
-        def __init__(self, pin=17, callback=None, bouncetime=200):
-            self.pin = pin
-            self.callback = callback
-            
-        def setup(self):
-            logger.info(f"Mock button setup on pin {self.pin}")
-            
-        def start_detection(self, callback=None):
-            cb = callback if callback is not None else self.callback
-            logger.info(f"Mock button detection started on pin {self.pin}")
-            
-        def cleanup(self):
-            logger.info("Mock button cleanup")
-    
-    class MockAudioRecorder:
-        def __init__(self, **kwargs):
-            self.is_recording = False
-            
-        def start_recording(self, callback=None):
-            self.is_recording = True
-            logger.info("Mock recording started")
-            
-            # Simulate recording for 3 seconds
-            def simulate_recording():
-                time.sleep(3)
-                self.is_recording = False
-                if callback:
-                    callback("audio/mock_recording.wav")
-                    
-            threading.Thread(target=simulate_recording).start()
-            return "audio/mock_recording.wav"
-            
-        def stop_recording(self):
-            self.is_recording = False
-            logger.info("Mock recording stopped")
-            
-        def cleanup(self):
-            logger.info("Mock audio recorder cleanup")
-    
-    class MockAudioPlayer:
-        def __init__(self, responses_dir="audio/responses"):
-            self.responses_dir = responses_dir
-            
-        def play_immediate_response(self, name=None):
-            logger.info(f"Mock playing immediate response: {name}")
-            return True
-            
-        def play_audio_file(self, file_path):
-            logger.info(f"Mock playing audio file: {file_path}")
-            return True
-            
-        def cleanup(self):
-            logger.info("Mock audio player cleanup")
-    
-    # Replace hardware modules with mock implementations
-    Button = MockButton
-    AudioRecorder = MockAudioRecorder
-    AudioPlayer = MockAudioPlayer
+# Audio device constants
+HEADPHONE_DEVICE = os.environ.get("AUDIO_PLAYBACK_DEVICE", "hw:2,0")  # Raspberry Pi headphone jack
+RECORDING_DEVICE = os.environ.get("AUDIO_RECORDING_DEVICE", "hw:3,0")  # USB microphone
 
-# Import server module
-try:
-    from server.websocket_server import WebSocketServer
-except ImportError as e:
-    logger.error(f"Error importing server module: {e}")
+# Eleven Labs API key
+ELEVEN_LABS_API_KEY = os.environ.get("ELEVENLABS_API_KEY")
+if not ELEVEN_LABS_API_KEY:
+    logger.error("Eleven Labs API key not set")
+    sys.exit(1)
+
+# Initialize the Eleven Labs client
+client = ElevenLabs(api_key=ELEVEN_LABS_API_KEY)
+
+# Callback for when the agent responds
+async def agent_response_callback(response):
+    print(f"Agent: {response}")
+    # Wait for a short period after the agent finishes speaking
+    await asyncio.sleep(2)  # Adjust the delay as needed
+
+# Initialize the Conversation instance with the callback
+conversation = Conversation(
+    client,
+    os.getenv("AGENT_ID"),
+    requires_auth=bool(ELEVEN_LABS_API_KEY),
+    audio_interface=DefaultAudioInterface(),
+    callback_agent_response=agent_response_callback,
+    callback_agent_response_correction=lambda original, corrected: print(f"Agent: {original} -> {corrected}"),
+    callback_user_transcript=lambda transcript: print(f"User: {transcript}"),
+)
+
+# Audio settings
+CHANNELS = 1  # Mono
+SAMPLE_RATE = 16000  # 16kHz
+
+def play_audio_file(audio_file, device=HEADPHONE_DEVICE):
+    """
+    Play an audio file (automatically detects format).
     
-    # Mock WebSocketServer for development
-    class MockWebSocketServer:
-        def __init__(self, host="0.0.0.0", port=8765):
-            self.host = host
-            self.port = port
+    Args:
+        audio_file (str): Path to the audio file
+        device (str): Audio device to use for playback
+        
+    Returns:
+        bool: True if playback was successful, False otherwise
+    """
+    import subprocess
+    
+    if not os.path.exists(audio_file):
+        logger.error(f"Audio file not found: {audio_file}")
+        return False
+        
+    # Determine file type based on extension
+    file_ext = os.path.splitext(audio_file)[1].lower()
+    
+    if file_ext == '.wav':
+        logger.info(f"Playing WAV: {audio_file} on device {device}")
+        try:
+            # Set volume to maximum before playback
+            subprocess.run(["amixer", "-c", "2", "set", "PCM", "100%"], check=False)
             
-        def start_server(self, audio_callback=None, response_callback=None):
-            logger.info(f"Mock WebSocket server started on {self.host}:{self.port}")
-            
-        def stop(self):
-            logger.info("Mock WebSocket server stopped")
-            
-        async def send_audio(self, audio_file):
-            logger.info(f"Mock sending audio: {audio_file}")
+            # Play the WAV file
+            subprocess.run(["aplay", "-D", device, audio_file], check=True)
             return True
-    
-    # Replace server module with mock implementation
-    WebSocketServer = MockWebSocketServer
+        except Exception as e:
+            logger.error(f"Error playing WAV file: {e}")
+            return False
+    elif file_ext == '.mp3':
+        logger.info(f"Playing MP3: {audio_file} on device {device}")
+        try:
+            # Play the MP3 file
+            subprocess.run(["mpg123", "-a", device, audio_file], check=True)
+            logger.info("Playback complete")
+            return True
+        except Exception as e:
+            logger.error(f"Error playing MP3 file: {e}")
+            return False
+    else:
+        logger.error(f"Unsupported audio format: {file_ext}")
+        return False
 
-
-class PollyApp:
-    """Main application class for Polly."""
+def play_beep():
+    """Play a beep sound to indicate recording start/stop."""
+    beep_path = "audio/responses/beep.wav"
     
-    def __init__(self, host="0.0.0.0", port=8765, button_pin=17):
-        """
-        Initialize the Polly application.
+    # Check if beep.wav exists
+    if not os.path.exists(beep_path):
+        logger.warning(f"{beep_path} not found, creating it")
         
-        Args:
-            host: Host to bind the WebSocket server to
-            port: Port to bind the WebSocket server to
-            button_pin: GPIO pin for the button
-        """
-        self.host = host
-        self.port = port
-        self.button_pin = button_pin
+        # Ensure directory exists
+        os.makedirs(os.path.dirname(beep_path), exist_ok=True)
         
-        # Create components
-        self.button = Button(pin=button_pin, callback=self.on_button_press)
-        self.audio_recorder = AudioRecorder(output_dir="audio")
-        self.audio_player = AudioPlayer(responses_dir="audio/responses")
-        self.websocket_server = WebSocketServer(host=host, port=port)
+        # Try to create a beep using speaker-test and arecord
+        try:
+            subprocess.run([
+                "bash", "-c",
+                "speaker-test -t sine -f 1000 -l 1 & pid=$!; "
+                "sleep 0.3; "
+                "arecord -d 1 -f cd -t wav -D hw:2,0 audio/responses/beep.wav; "
+                "kill $pid"
+            ], check=True)
+        except Exception as e:
+            logger.error(f"Error creating beep.wav: {e}")
+            return False
+    
+    # Play the beep
+    return play_audio_file(beep_path)
+
+def ensure_directories():
+    """Ensure necessary directories exist."""
+    os.makedirs("audio", exist_ok=True)
+    os.makedirs("audio/responses", exist_ok=True)
+    os.makedirs("audio/recordings", exist_ok=True)
+
+def handle_exit(signal, frame):
+    """Handle exit signals gracefully."""
+    logger.info("Exiting...")
+    sys.exit(0)
+
+class AudioPlayer:
+    """Simple audio player for streaming audio data."""
+    
+    def __init__(self):
+        self.buffer = b""
+        self.playing = False
+        self.thread = None
         
-        # State
-        self.is_running = False
-        self.server_thread = None
+    def add_data(self, data):
+        """Add audio data to the buffer."""
+        self.buffer += data
         
-    def on_button_press(self, channel):
-        """
-        Handle button press event.
-        
-        Args:
-            channel: GPIO channel
-        """
-        logger.info(f"Button pressed on channel {channel}")
-        
-        # Play immediate response
-        self.audio_player.play_immediate_response()
-        
-        # Start recording
-        filename = self.audio_recorder.start_recording(callback=self.on_recording_complete)
-        logger.info(f"Recording to {filename}")
-        
-    def on_recording_complete(self, filename):
-        """
-        Handle recording complete event.
-        
-        Args:
-            filename: Path to the recorded audio file
-        """
-        logger.info(f"Recording complete: {filename}")
-        
-        # Send audio to web app
-        asyncio.run(self.send_audio_to_webapp(filename))
-        
-    async def send_audio_to_webapp(self, filename):
-        """
-        Send audio to web app.
-        
-        Args:
-            filename: Path to the audio file
-        """
-        logger.info(f"Sending audio to web app: {filename}")
-        
-        # Send audio via WebSocket
-        await self.websocket_server.send_audio(filename)
-        
-    def on_response_received(self, filename):
-        """
-        Handle response received event.
-        
-        Args:
-            filename: Path to the response audio file
-        """
-        logger.info(f"Response received: {filename}")
-        
-        # Play response
-        self.audio_player.play_audio_file(filename)
-        
-    def start(self):
-        """Start the Polly application."""
-        if self.is_running:
-            logger.warning("Polly is already running")
+        # Start playback if not already playing
+        if not self.playing:
+            self.start_playback()
+    
+    def start_playback(self):
+        """Start playing audio from the buffer."""
+        if self.playing:
             return
             
-        logger.info("Starting Polly")
-        
-        # Set up button
-        self.button.setup()
-        self.button.start_detection()
-        
-        # Start WebSocket server in a separate thread
-        self.server_thread = threading.Thread(
-            target=self.websocket_server.start_server,
-            kwargs={
-                "response_callback": self.on_response_received
-            }
-        )
-        self.server_thread.daemon = True
-        self.server_thread.start()
-        
-        self.is_running = True
-        logger.info("Polly started")
-        
-        # Create sample immediate response if none exist
-        self._create_sample_responses()
-        
-    def stop(self):
-        """Stop the Polly application."""
-        if not self.is_running:
-            logger.warning("Polly is not running")
-            return
+        self.playing = True
+        self.thread = threading.Thread(target=self._playback_thread)
+        self.thread.daemon = True
+        self.thread.start()
+    
+    def _playback_thread(self):
+        """Thread for playing audio data."""
+        try:
+            import tempfile
+            import os
             
-        logger.info("Stopping Polly")
-        
-        # Stop recording if in progress
-        self.audio_recorder.stop_recording()
-        
-        # Stop WebSocket server
-        self.websocket_server.stop()
-        
-        # Clean up resources
-        self.button.cleanup()
-        self.audio_recorder.cleanup()
-        self.audio_player.cleanup()
-        
-        self.is_running = False
-        logger.info("Polly stopped")
-        
-    def _create_sample_responses(self):
-        """Create sample immediate response sounds if none exist."""
-        responses_dir = "audio/responses"
-        os.makedirs(responses_dir, exist_ok=True)
-        
-        # Check if any immediate response files exist
-        has_responses = False
-        for filename in os.listdir(responses_dir):
-            if filename.startswith("immediate_") and filename.endswith(".wav"):
-                has_responses = True
-                break
+            # Create a temporary file for the audio data
+            with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as temp_file:
+                temp_path = temp_file.name
                 
-        # If no responses exist, create a README file with instructions
-        if not has_responses:
-            readme_path = os.path.join(responses_dir, "README.md")
-            with open(readme_path, "w") as f:
-                f.write("""# Immediate Response Sounds
-
-This directory should contain immediate response sounds that Polly will play
-when the button is pressed, before recording starts.
-
-Files should be named with the format `immediate_NAME.wav`, where NAME is a
-descriptive name for the response.
-
-Example files:
-- `immediate_thinking.wav` - "Let me think about that..."
-- `immediate_listening.wav` - "I'm listening..."
-- `immediate_processing.wav` - "Processing your question..."
-
-You can create these files using text-to-speech services or record them yourself.
-""")
-            logger.info(f"Created {readme_path} with instructions for immediate responses")
-
-
-def parse_args():
-    """Parse command line arguments."""
-    parser = argparse.ArgumentParser(description="Polly - AI-Powered Talking Bird")
-    parser.add_argument("--host", default="0.0.0.0", help="Host to bind the WebSocket server to")
-    parser.add_argument("--port", type=int, default=8765, help="Port to bind the WebSocket server to")
-    parser.add_argument("--button-pin", type=int, default=17, help="GPIO pin for the button")
-    return parser.parse_args()
-
-
-def main():
-    """Main entry point."""
-    # Parse command line arguments
-    args = parse_args()
-    
-    # Create and start the application
-    app = PollyApp(
-        host=args.host,
-        port=args.port,
-        button_pin=args.button_pin
-    )
-    
-    try:
-        # Start the application
-        app.start()
-        
-        # Keep the main thread running
-        logger.info("Polly is running. Press Ctrl+C to exit.")
-        while True:
-            time.sleep(1)
+            # Keep playing chunks as they come in
+            while True:
+                if len(self.buffer) > 4000:  # Play in chunks of ~0.25 seconds
+                    chunk = self.buffer[:4000]
+                    self.buffer = self.buffer[4000:]
+                    
+                    # Write chunk to temporary file
+                    with open(temp_path, "wb") as f:
+                        # Simple WAV header for raw PCM data
+                        # This is a very basic header and might need adjustment
+                        f.write(b"RIFF")
+                        f.write((36 + len(chunk)).to_bytes(4, 'little'))
+                        f.write(b"WAVE")
+                        f.write(b"fmt ")
+                        f.write((16).to_bytes(4, 'little'))
+                        f.write((1).to_bytes(2, 'little'))  # PCM format
+                        f.write((CHANNELS).to_bytes(2, 'little'))
+                        f.write((SAMPLE_RATE).to_bytes(4, 'little'))
+                        f.write((SAMPLE_RATE * CHANNELS * 2).to_bytes(4, 'little'))
+                        f.write((CHANNELS * 2).to_bytes(2, 'little'))
+                        f.write((16).to_bytes(2, 'little'))
+                        f.write(b"data")
+                        f.write((len(chunk)).to_bytes(4, 'little'))
+                        f.write(chunk)
+                    
+                    # Play the chunk
+                    play_audio_file(temp_path)
+                    
+                elif not self.buffer:
+                    # No more data, stop playback
+                    break
+                else:
+                    # Wait for more data
+                    time.sleep(0.1)
             
+            # Clean up
+            try:
+                os.unlink(temp_path)
+            except:
+                pass
+                
+        except Exception as e:
+            logger.error(f"Error in audio playback: {e}")
+        finally:
+            self.playing = False
+
+async def elevenlabs_conversation():
+    """
+    Run a conversation with Eleven Labs' Conversational AI.
+    """
+    try:
+        # Define is_recording within the function scope
+        is_recording = False
+
+        # Start the conversation session
+        conversation.start_session()
+
+        # Function to handle user input in a separate thread
+        def input_thread():
+            nonlocal is_recording
+            while True:
+                cmd = input("Press Enter to start/stop conversation, or 'q' to quit: ")
+                if cmd.lower() == 'q':
+                    print("Quitting...")
+                    os._exit(0)  # Force exit
+                else:
+                    is_recording = not is_recording
+                    if is_recording:
+                        print("Conversation started... (Press Enter to stop)")
+                        play_beep()
+                    else:
+                        print("Conversation stopped.")
+                        play_beep()
+
+        # Start input thread
+        input_thread = threading.Thread(target=input_thread)
+        input_thread.daemon = True
+        input_thread.start()
+
+        # Main event loop
+        while True:
+            if is_recording:
+                # Wait for the conversation to end
+                conversation_id = conversation.wait_for_session_end()
+                print(f"Conversation ID: {conversation_id}")
+
+            # Small sleep to prevent CPU hogging
+            await asyncio.sleep(0.01)
+
+    except Exception as e:
+        logger.error(f"Error in Eleven Labs conversation: {e}")
+        print(f"Error: {e}")
+
+    finally:
+        # End the conversation session
+        conversation.end_session()
+
+# Update main function to use Eleven Labs
+async def main():
+    """Main entry point."""
+    logger.info("Starting Polly voice assistant with Eleven Labs Conversational AI")
+
+    # Register signal handlers
+    signal.signal(signal.SIGINT, handle_exit)
+    signal.signal(signal.SIGTERM, handle_exit)
+
+    # Ensure directories exist
+    ensure_directories()
+
+    # Run the Eleven Labs conversation
+    try:
+        await elevenlabs_conversation()
     except KeyboardInterrupt:
         logger.info("Interrupted by user")
-    finally:
-        # Stop the application
-        app.stop()
+    except Exception as e:
+        logger.error(f"Error in main loop: {e}")
+        print(f"Error: {e}")
 
+    logger.info("Exiting Polly")
+    return 0
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())

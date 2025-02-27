@@ -1,112 +1,189 @@
+#!/usr/bin/env python3
 """
-Button handling module for Polly.
+Button handler for Polly.
 
-This module provides functionality to detect button presses on GPIO 17.
+This module provides functionality to detect button presses and trigger actions.
 """
 
-try:
-    import RPi.GPIO as GPIO
-except ImportError:
-    # For development on non-Raspberry Pi systems
-    print("Warning: RPi.GPIO not available. Using mock implementation.")
-    
-    class MockGPIO:
-        BCM = "BCM"
-        IN = "IN"
-        RISING = "RISING"
-        PUD_DOWN = "PUD_DOWN"
-        
-        def setmode(self, mode):
-            print(f"GPIO.setmode({mode})")
-            
-        def setup(self, pin, direction, pull_up_down=None):
-            pull_up_down_str = f", pull_up_down={pull_up_down}" if pull_up_down else ""
-            print(f"GPIO.setup({pin}, {direction}{pull_up_down_str})")
-            
-        def add_event_detect(self, pin, edge, callback=None, bouncetime=None):
-            bouncetime_str = f", bouncetime={bouncetime}" if bouncetime else ""
-            print(f"GPIO.add_event_detect({pin}, {edge}, callback=Function{bouncetime_str})")
-            
-        def cleanup(self):
-            print("GPIO.cleanup()")
-    
-    GPIO = MockGPIO()
+import os
+import time
+import RPi.GPIO as GPIO
+import subprocess
+import logging
+from datetime import datetime
 
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger('hardware.button')
 
-class Button:
-    """Class to handle button press detection."""
+# Button configuration
+BUTTON_PIN = 17  # GPIO pin connected to the button
+LED_PIN = 18     # GPIO pin for LED indicator (future use)
+
+# Audio paths
+AUDIO_DIR = "audio"
+RESPONSES_DIR = os.path.join(AUDIO_DIR, "responses")
+FEEDBACK_SOUND = os.path.join(RESPONSES_DIR, "beep.wav")
+
+# Ensure directories exist
+os.makedirs(AUDIO_DIR, exist_ok=True)
+os.makedirs(RESPONSES_DIR, exist_ok=True)
+
+class ButtonHandler:
+    """
+    Handler for button press events that triggers audio recording and processing.
+    """
     
-    def __init__(self, pin=17, callback=None, bouncetime=200):
+    def __init__(self, audio_utils=None):
         """
         Initialize the button handler.
         
         Args:
-            pin (int): GPIO pin number (BCM mode) connected to the button.
-            callback (function): Function to call when button is pressed.
-            bouncetime (int): Debounce time in milliseconds.
+            audio_utils: Audio utilities module for playback and recording
         """
-        self.pin = pin
-        self.callback = callback
-        self.bouncetime = bouncetime
-        self.is_setup = False
+        self.audio_utils = audio_utils
+        self.is_recording = False
+        self.setup_gpio()
         
-    def setup(self):
-        """Set up the GPIO pin for button detection."""
-        if self.is_setup:
-            return
-            
+    def setup_gpio(self):
+        """Set up GPIO pins for button and LED."""
+        # Use BCM pin numbering
         GPIO.setmode(GPIO.BCM)
-        GPIO.setup(self.pin, GPIO.IN, pull_up_down=GPIO.PUD_DOWN)
-        self.is_setup = True
-        print(f"Button setup on GPIO {self.pin}")
         
-    def start_detection(self, callback=None):
+        # Set up button pin as input with pull-down resistor
+        GPIO.setup(BUTTON_PIN, GPIO.IN, pull_up_down=GPIO.PUD_DOWN)
+        
+        # Set up LED pin as output (for future use)
+        GPIO.setup(LED_PIN, GPIO.OUT)
+        GPIO.output(LED_PIN, GPIO.LOW)
+        
+        # Add event detection for button press
+        GPIO.add_event_detect(
+            BUTTON_PIN, 
+            GPIO.RISING, 
+            callback=self.on_button_press, 
+            bouncetime=300
+        )
+        
+        logger.info(f"GPIO initialized. Button on pin {BUTTON_PIN}, LED on pin {LED_PIN}")
+    
+    def play_feedback_sound(self):
+        """Play immediate feedback sound when button is pressed."""
+        if self.audio_utils:
+            self.audio_utils.play_wav(FEEDBACK_SOUND)
+        else:
+            # Fallback if audio_utils not provided
+            try:
+                subprocess.run(["aplay", FEEDBACK_SOUND], check=True)
+                logger.info(f"Played feedback sound: {FEEDBACK_SOUND}")
+            except Exception as e:
+                logger.error(f"Error playing feedback sound: {e}")
+    
+    def start_recording(self):
+        """Start recording audio."""
+        if self.is_recording:
+            logger.warning("Already recording, ignoring button press")
+            return None
+            
+        self.is_recording = True
+        GPIO.output(LED_PIN, GPIO.HIGH)  # Turn on LED to indicate recording
+        
+        # Generate output filename with timestamp
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        output_file = os.path.join(AUDIO_DIR, f"recording_{timestamp}.wav")
+        
+        logger.info(f"Starting recording to {output_file}")
+        
+        if self.audio_utils:
+            # Use audio_utils if available
+            recorded_file = self.audio_utils.record_audio(output_file)
+        else:
+            # Fallback to direct subprocess call
+            try:
+                # Record for 5 seconds (in a real implementation, we'd use silence detection)
+                subprocess.run([
+                    "arecord", 
+                    "-D", "hw:4,0",  # USB audio device
+                    "-d", "5",       # Duration in seconds
+                    "-f", "cd",      # Format (CD quality)
+                    "-t", "wav", 
+                    output_file
+                ], check=True)
+                recorded_file = output_file
+                logger.info(f"Recording saved to {output_file}")
+            except Exception as e:
+                logger.error(f"Error recording audio: {e}")
+                recorded_file = None
+        
+        self.is_recording = False
+        GPIO.output(LED_PIN, GPIO.LOW)  # Turn off LED
+        
+        return recorded_file
+    
+    def on_button_press(self, channel):
         """
-        Start detecting button presses.
+        Callback function for button press event.
         
         Args:
-            callback (function, optional): Function to call when button is pressed.
-                If provided, overrides the callback set during initialization.
+            channel: GPIO channel that triggered the event
         """
-        if not self.is_setup:
-            self.setup()
-            
-        # Use the provided callback or the one from initialization
-        cb = callback if callback is not None else self.callback
+        logger.info(f"Button pressed on channel {channel}")
         
-        if cb is None:
-            raise ValueError("No callback function provided")
-            
-        GPIO.add_event_detect(self.pin, GPIO.RISING, callback=cb, bouncetime=self.bouncetime)
-        print(f"Button detection started on GPIO {self.pin}")
+        # Play feedback sound
+        self.play_feedback_sound()
+        
+        # Start recording
+        recorded_file = self.start_recording()
+        
+        if recorded_file:
+            logger.info(f"Successfully recorded to {recorded_file}")
+            # Here we would process the recording with APIs
+            # This will be implemented in the next step
         
     def cleanup(self):
         """Clean up GPIO resources."""
-        if self.is_setup:
-            GPIO.cleanup()
-            self.is_setup = False
-            print("Button GPIO resources cleaned up")
-
+        GPIO.cleanup()
+        logger.info("GPIO resources cleaned up")
 
 # Example usage
 if __name__ == "__main__":
-    def on_button_press(channel):
-        print(f"Button pressed on channel {channel}!")
-        
     try:
-        button = Button(pin=17, callback=on_button_press)
-        button.setup()
-        button.start_detection()
+        # Import audio_utils if available
+        try:
+            import sys
+            sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+            from audio_utils import play_wav, record_audio
+            
+            class AudioUtils:
+                @staticmethod
+                def play_wav(file_path):
+                    return play_wav(file_path)
+                
+                @staticmethod
+                def record_audio(output_file=None, duration=5, device="hw:4,0"):
+                    return record_audio(output_file, duration, device)
+            
+            audio_utils = AudioUtils()
+            logger.info("Using audio_utils for playback and recording")
+        except ImportError:
+            audio_utils = None
+            logger.warning("audio_utils not available, using fallback methods")
         
-        print("Waiting for button press. Press Ctrl+C to exit.")
+        # Create button handler
+        handler = ButtonHandler(audio_utils)
+        
+        print("Button handler initialized. Press the button (GPIO 17) to start recording.")
+        print("Press Ctrl+C to exit.")
+        
         # Keep the program running
-        import time
         while True:
             time.sleep(1)
             
     except KeyboardInterrupt:
-        print("Exiting...")
+        print("\nExiting...")
     finally:
         # Clean up GPIO resources
-        if 'button' in locals():
-            button.cleanup()
+        GPIO.cleanup()

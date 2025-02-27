@@ -9,8 +9,42 @@ import os
 import time
 import wave
 import threading
-import numpy as np
 from datetime import datetime
+
+# Try to import numpy, but provide a fallback if it fails
+try:
+    import numpy as np
+except ImportError:
+    print("Warning: numpy not available. Using array module as fallback.")
+    import array
+    
+    # Create a simple numpy-like interface using the array module
+    class NumpyFallback:
+        # Add data types
+        int16 = 'int16'
+        
+        def frombuffer(self, buffer, dtype=None):
+            if dtype == self.int16 or dtype == 'int16':
+                return array.array('h', buffer)
+            return array.array('B', buffer)
+            
+        def sqrt(self, value):
+            if hasattr(value, '__iter__'):
+                return sum(x*x for x in value) ** 0.5
+            return value ** 0.5
+            
+        def mean(self, value):
+            if hasattr(value, '__iter__'):
+                return sum(value) / len(value)
+            return value
+            
+        def square(self, value):
+            if hasattr(value, '__iter__'):
+                return [x*x for x in value]
+            return value * value
+    
+    # Use the fallback implementation
+    np = NumpyFallback()
 
 try:
     import pyaudio
